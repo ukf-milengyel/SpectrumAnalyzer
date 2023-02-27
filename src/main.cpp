@@ -8,9 +8,7 @@
 #define AMPLITUDE       1000          // Depending on your audio source level, you may need to alter this value. Can be used as a 'sensitivity' control.
 #define AUDIO_IN_PIN    36            // Signal in on this pin
 #define MAX_MILLIAMPS   1000          // Careful with the amount of power here if running off USB port
-#define NOISE           500           // Used as a crude noise filter, values below this are ignored
-const uint8_t kMatrixWidth = 16;                          // Matrix width
-const uint8_t kMatrixHeight = 16;                         // Matrix height
+#define NOISE           1500           // Used as a crude noise filter, values below this are ignored
 
 // Sampling and FFT stuff
 unsigned int sampling_period_us;
@@ -22,16 +20,17 @@ double vImag[SAMPLES];
 unsigned long newTime;
 arduinoFFT FFT = arduinoFFT(vReal, vImag, SAMPLES, SAMPLING_FREQ);
 
-U8G2_MAX7219_32X8_F_4W_SW_SPI u8g2(U8G2_R2, 32, 33, 5, U8X8_PIN_NONE, U8X8_PIN_NONE);
+U8G2_MAX7219_32X8_F_4W_SW_SPI u8g2(U8G2_R2, 18, 23, 5, U8X8_PIN_NONE, U8X8_PIN_NONE);
 
 void setup() {
   sampling_period_us = round(1000000 * (1.0 / SAMPLING_FREQ));
   u8g2.begin();
+  u8g2.setContrast(0);
+  u8g2.firstPage();
 }
 
 void loop() {
 
-    // Sample the audio pin
     for (int i = 0; i < SAMPLES; i++) {
         newTime = micros();
         vReal[i] = analogRead(AUDIO_IN_PIN); // A conversion takes about 9.7uS on an ESP32
@@ -84,10 +83,13 @@ void loop() {
         }
     }
 
+    u8g2.clear();
     for (int i = 0; i < 16; i++) {
-        printf("%6d", bandValues[i]);
+        //printf("%6d", bandValues[i]);
+        u8g2.drawBox(i*2, 0, 2, map(bandValues[i], 1500, 20000, 0, 8));
     }
-    printf("\n");
+    u8g2.nextPage();
+    //printf("\n");
 
     // brightness test
     /*
