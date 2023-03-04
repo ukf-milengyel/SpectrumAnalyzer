@@ -1,41 +1,53 @@
 #include <Arduino.h>
+#include <driver/i2s.h>
 #include <SPI.h>
 #include <U8g2lib.h>
 #include <arduinoFFT.h>
 
-#define SAMPLES         1024          // Must be a power of 2
+#define SAMPLES         512          // Must be a power of 2
 #define SAMPLING_FREQ   40000         // Hz, must be 40000 or less due to ADC conversion time. Determines maximum frequency that can be analysed by the FFT Fmax=sampleF/2.
-#define AMPLITUDE       1000          // Depending on your audio source level, you may need to alter this value. Can be used as a 'sensitivity' control.
-#define AUDIO_IN_PIN    36            // Signal in on this pin
-#define MAX_MILLIAMPS   1000          // Careful with the amount of power here if running off USB port
-#define NOISE           1500           // Used as a crude noise filter, values below this are ignored
+#define NOISE           1000           // Used as a crude noise filter, values below this are ignored
 
-// Sampling and FFT stuff
-unsigned int sampling_period_us;
-byte peak[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};              // The length of these arrays must be >= NUM_BANDS
-int oldBarHeights[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-int bandValues[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+int bandValues[16];
+uint8_t barValues[16];
+int16_t samples[SAMPLES];
 double vReal[SAMPLES];
 double vImag[SAMPLES];
-unsigned long newTime;
-arduinoFFT FFT = arduinoFFT(vReal, vImag, SAMPLES, SAMPLING_FREQ);
 
+arduinoFFT FFT = arduinoFFT(vReal, vImag, SAMPLES, SAMPLING_FREQ);
 U8G2_MAX7219_32X8_F_4W_SW_SPI u8g2(U8G2_R2, 18, 23, 5, U8X8_PIN_NONE, U8X8_PIN_NONE);
 
 void setup() {
-  sampling_period_us = round(1000000 * (1.0 / SAMPLING_FREQ));
-  u8g2.begin();
-  u8g2.setContrast(0);
-  u8g2.firstPage();
+    // setup i2s
+    const i2s_config_t i2s_config = {
+        .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX | I2S_MODE_ADC_BUILT_IN),
+        .sample_rate = SAMPLING_FREQ,
+        .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+        .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+        .communication_format = I2S_COMM_FORMAT_I2S_MSB,
+        .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,  // Interrupt level 1, default 0
+        .dma_buf_count = 4,
+        .dma_buf_len = SAMPLES,
+        .use_apll = false,
+    };
+    adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_0db);
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
+
+    u8g2.begin();
+    u8g2.setContrast(0);
+    u8g2.firstPage();
 }
 
 void loop() {
 
-    for (int i = 0; i < SAMPLES; i++) {
-        newTime = micros();
-        vReal[i] = analogRead(AUDIO_IN_PIN); // A conversion takes about 9.7uS on an ESP32
-        vImag[i] = 0;
-        while ((micros() - newTime) < sampling_period_us);
+    // read bytes
+    size_t bytes_read;
+    i2s_read(I2S_NUM_0, samples, sizeof(samples), &bytes_read, portMAX_DELAY);
+    
+    for (uint16_t i = 0; i < SAMPLES; i++) {
+        vReal[i] = samples[i];
+        vImag[i] = 0.0; //Imaginary part must be zeroed in case of looping to avoid wrong calculations and overflows
     }
 
     // Compute FFT
@@ -46,7 +58,7 @@ void loop() {
 
     // Reset bandValues[]
     for (int i = 0; i<16; i++){
-      bandValues[i] = 0;
+        bandValues[i] = 0;
     }
 
     // Analyse FFT results
@@ -85,32 +97,11 @@ void loop() {
 
     u8g2.clear();
     for (int i = 0; i < 16; i++) {
-        //printf("%6d", bandValues[i]);
-        u8g2.drawBox(i*2, 0, 2, map(bandValues[i], 1500, 20000, 0, 8));
+        uint8_t newValue = map(bandValues[i], 0, 20000, 0, 8);
+        barValues[i] = max(newValue > 8 ? 8 : newValue, barValues[i] - 1);
+        //printf("%10d", bandValues[i]);
+        u8g2.drawBox(i*2, 8 - barValues[i], 2, barValues[i]);
     }
     u8g2.nextPage();
     //printf("\n");
-
-    // brightness test
-    /*
-    u8g2.firstPage();
-    for(int i = 0; i < 255; i++){
-        u8g2.setContrast(i);
-        u8g2.drawBox(0,4,i/7,4);
-        u8g2.drawBox(0,0,32,4);
-        u8g2.nextPage();
-        delay(20);
-    }
-    */
-
-    // display text
-    /*
-    do {
-      u8g2.setFont(u8g2_font_tiny_simon_tr);
-      //u8g2.drawStr(0,5,"Ayo diego");
-      u8g2.drawBox(0,0,32,8);
-      delay(1000);
-    } while ( u8g2.nextPage() );
-    delay(1000);
-    */
 }
