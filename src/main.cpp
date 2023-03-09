@@ -7,15 +7,20 @@
 #define SAMPLES         512          // Must be a power of 2
 #define SAMPLING_FREQ   40000         // Hz, must be 40000 or less due to ADC conversion time. Determines maximum frequency that can be analysed by the FFT Fmax=sampleF/2.
 #define NOISE           1000           // Used as a crude noise filter, values below this are ignored
+#define BANDFALLOFF     1
+#define MAXPEAKGRAVITY  0.7
 
-int bandValues[16];
-uint8_t barValues[16];
 int16_t samples[SAMPLES];
 double vReal[SAMPLES];
 double vImag[SAMPLES];
 
+int bandValues[16];
+uint8_t barValues[16];
+float peakGravity[16];
+float peakValues[16];
+
 arduinoFFT FFT = arduinoFFT(vReal, vImag, SAMPLES, SAMPLING_FREQ);
-U8G2_MAX7219_32X8_F_4W_SW_SPI u8g2(U8G2_R2, 18, 23, 5, U8X8_PIN_NONE, U8X8_PIN_NONE);
+U8G2_MAX7219_64X8_F_4W_SW_SPI u8g2(U8G2_R2, 18, 23, 5, U8X8_PIN_NONE, U8X8_PIN_NONE);
 
 void setup() {
     // setup i2s
@@ -33,6 +38,9 @@ void setup() {
     adc1_config_channel_atten(ADC1_CHANNEL_0, ADC_ATTEN_0db);
     i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
     i2s_set_adc_mode(ADC_UNIT_1, ADC1_CHANNEL_0);
+
+    for (int i = 0; i<16; i++)
+        peakValues[i] = 0;
 
     u8g2.begin();
     u8g2.setContrast(0);
@@ -57,9 +65,8 @@ void loop() {
     FFT.ComplexToMagnitude();
 
     // Reset bandValues[]
-    for (int i = 0; i<16; i++){
+    for (int i = 0; i<16; i++)
         bandValues[i] = 0;
-    }
 
     // Analyse FFT results
     for (int i = 2; i < (SAMPLES/2); i++){       // Don't use sample 0 and only first SAMPLES/2 are usable. Each array element represents a frequency bin and its value the amplitude.
@@ -95,12 +102,35 @@ void loop() {
         }
     }
 
-    u8g2.clear();
+    // draw to display
+    u8g2.firstPage();
     for (int i = 0; i < 16; i++) {
-        uint8_t newValue = map(bandValues[i], 0, 20000, 0, 8);
-        barValues[i] = max(newValue > 8 ? 8 : newValue, barValues[i] - 1);
+        // calculate bar heights
+        uint8_t newValue = map(bandValues[i], 0, 20000, 0, 16);
+        barValues[i] = max(newValue > 16 ? 16 : newValue, barValues[i] - BANDFALLOFF);
+
+        // calculate peak positions
+        if (newValue > peakValues[i]) {
+            peakGravity[i] = 0.1;
+            peakValues[i] = barValues[i];
+        } else {
+            peakGravity[i] += peakGravity[i] <= MAXPEAKGRAVITY ? 0.025 : 0;
+            peakValues[i] = peakValues <= 0 ? 0 :peakValues[i] - peakGravity[i];
+        }
+        
+
+        // draw bars
+        uint8_t topValue = barValues[i] > 7 ? barValues[i] - 8 : 0;
+        uint8_t bottomValue = barValues[i] > 8 ? 8 : barValues[i];
+        u8g2.drawBox(i*2,       8 - topValue,       2, topValue);
+        u8g2.drawBox(32+i*2,    8 - bottomValue,    2, bottomValue);
+
+        // draw peaks
+        uint8_t peakX = (peakValues[i] > 8 ? 0 : 32) + i*2;
+        uint8_t peakY = 7 - ((uint8_t)(peakValues[i]) % 8);
+        u8g2.drawHLine(peakX, peakY, 2);
+
         //printf("%10d", bandValues[i]);
-        u8g2.drawBox(i*2, 8 - barValues[i], 2, barValues[i]);
     }
     u8g2.nextPage();
     //printf("\n");
