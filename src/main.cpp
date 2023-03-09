@@ -4,11 +4,11 @@
 #include <U8g2lib.h>
 #include <arduinoFFT.h>
 
-#define SAMPLES         512          // Must be a power of 2
-#define SAMPLING_FREQ   40000         // Hz, must be 40000 or less due to ADC conversion time. Determines maximum frequency that can be analysed by the FFT Fmax=sampleF/2.
-#define NOISE           1000           // Used as a crude noise filter, values below this are ignored
+#define SAMPLES         512
+#define SAMPLING_FREQ   44100
+#define NOISE           1000
 #define BANDFALLOFF     1
-#define MAXPEAKGRAVITY  0.7
+#define MAXPEAKGRAVITY  0.5
 
 int16_t samples[SAMPLES];
 double vReal[SAMPLES];
@@ -111,14 +111,13 @@ void loop() {
 
         // calculate peak positions
         if (newValue > peakValues[i]) {
-            peakGravity[i] = 0.1;
+            peakGravity[i] = 0;
             peakValues[i] = barValues[i];
         } else {
-            peakGravity[i] += peakGravity[i] <= MAXPEAKGRAVITY ? 0.025 : 0;
+            peakGravity[i] += peakGravity[i] <= MAXPEAKGRAVITY ? 0.01 : 0;
             peakValues[i] = peakValues <= 0 ? 0 :peakValues[i] - peakGravity[i];
         }
         
-
         // draw bars
         uint8_t topValue = barValues[i] > 7 ? barValues[i] - 8 : 0;
         uint8_t bottomValue = barValues[i] > 8 ? 8 : barValues[i];
